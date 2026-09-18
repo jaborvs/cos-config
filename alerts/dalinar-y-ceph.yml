@@ -1,0 +1,96 @@
+groups:
+  - name: dalinar-host
+    rules:
+      - alert: HostMemoryPressureHigh
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memoria disponible baja en {{ $labels.host }}"
+          description: "Menos del 10% de RAM disponible durante 10 minutos. Sin swap de colchón, el siguiente paso es el OOM-killer."
+
+      - alert: HostOOMKill
+        expr: increase(node_vmstat_oom_kill[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "OOM-kill detectado en {{ $labels.host }}"
+          description: "El kernel mató un proceso por falta de memoria en los últimos 5 minutos."
+
+      - alert: HostDiskSpaceLow
+        expr: |
+          node_filesystem_avail_bytes{fstype!~"tmpfs|devtmpfs"}
+            / node_filesystem_size_bytes{fstype!~"tmpfs|devtmpfs"} < 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Poco espacio libre en {{ $labels.mountpoint }} ({{ $labels.host }})"
+          description: "Menos del 15% de espacio libre durante 10 minutos."
+
+      - alert: HostHighLoad1
+        expr: node_load1 / count without (cpu, mode) (node_cpu_seconds_total{mode="idle"}) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Carga alta sostenida en {{ $labels.host }}"
+          description: "load1 por encima de 1.5x el número de CPUs durante 10 minutos."
+
+  - name: adguard
+    rules:
+      - alert: AdGuardOOMKilled
+        expr: increase(lxd_memory_OOM_kills_total{name="adguard"}[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "El contenedor de AdGuard sufrió un OOM-kill"
+          description: "DNS de la LAN en riesgo — revisa el estado del contenedor en micro01."
+
+  - name: ceph
+    rules:
+      - alert: CephHealthError
+        expr: ceph_health_status == 2
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ceph en HEALTH_ERR"
+          description: "Estado ERR (no WARN) — el WARN de 1 nodo/size 1 es el estado aceptado, esto es un problema real."
+
+      - alert: CephOSDDown
+        expr: ceph_osd_up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "OSD {{ $labels.ceph_daemon }} caído"
+          description: "Sin swap en micro01, esto puede ser un OOM-kill del daemon, no solo lentitud."
+
+      - alert: CephPGsNotClean
+        expr: |
+          (ceph_pg_degraded + ceph_pg_undersized + ceph_pg_incomplete
+            + ceph_pg_down + ceph_pg_inconsistent + ceph_pg_stale) > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PGs de Ceph fuera de active+clean"
+          description: "Riesgo real de pérdida/corrupción de datos, no el WARN cosmético de siempre."
+
+      - alert: CephPoolNearFull
+        expr: ceph_cluster_total_used_bytes / ceph_cluster_total_bytes > 0.85
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pool de Ceph por encima del 85% de uso"
+          description: "El pool tiene tamaño fijo, distinto del HDD físico completo — puede llenarse antes de lo que parece."
+
+      - alert: CephMetricsAbsent
+        expr: absent(ceph_health_status)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ceph dejó de reportar métricas"
+          description: "No es que Ceph esté mal — es que Alloy dejó de empujar sus métricas."
